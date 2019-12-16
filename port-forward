@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+
+ITEM=$1
+
+if [[ -n $K ]]
+then
+  config="--kubeconfig $K"
+fi
+
+if [[ -z $ITEM ]]; then
+  echo 'Use the parameter!'
+  exit 6
+fi
+
+RED='\033[1;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+WHITE='\033[1;37m'
+ORANGE='\033[0;33m'
+NC='\033[0m'
+
+get_namespace() {
+  echo $1 | cut -d ':' -f 1
+}
+
+get_name_temp() {
+  echo $1 | cut -d ':' -f 2
+}
+get_name() {
+  echo $(get_name_temp $1) | cut -d '/' -f 2
+}
+get_type() {
+  echo $(get_name_temp $1) | cut -d '/' -f 1
+}
+
+get_port() {
+  echo $1 | cut -d ':' -f 1
+}
+
+get_proto() {
+  echo $1 | cut -d ':' -f 2
+}
+echo kubectl $config get all --all-namespaces
+what_we_found=$(kubectl $config get all --all-namespaces | grep $ITEM | egrep 'pod|service' | awk '{print $1 ":" $2}')
+
+if [[ -n $what_we_found ]]; then
+  echo Choose what you want
+  position=1
+  for i in $what_we_found; do
+    printf "${RED}$position${NC}) ${YELLOW}$(get_type $i) ${GREEN}$(get_name $i)${NC} in namespace ${WHITE}$(get_namespace $i)${NC}\n"
+    position=$((position + 1))
+  done
+  read -r -p 'Choose a number: ' position
+  selected=$(echo "$what_we_found" | sed -n "$position"p)
+  name=$(get_name $selected)
+  type=$(get_type $selected)
+  namespace=$(get_namespace $selected)
+  echo You choosed $type $name in namespace $namespace
+  case $type in
+  "service")
+    data=$(kubectl $config get svc -n $namespace $name -o go-template='{{range.spec.ports}}{{.port}}{{":"}}{{.protocol}}{{"\n"}}{{end}}')
+    echo "Which port to connect?"
+    position=1
+    for i in $data; do
+      proto=$(get_proto $i)
+      port=$(get_port $i)
+      printf "${RED}$position${NC}) ${YELLOW}$proto ${GREEN} $port${NC}\n"
+      position=$((position + 1))
+    done
+    read -r -p 'Choose a number: ' position
+    selected=$(echo "$data" | sed -n "$position"p)
+    proto=$(get_proto $selected)
+    port=$(get_port $selected)
+    read -r -p 'Choose a localport to forward (the same as remote by default): ' localport
+    if [[ -z $localport ]]; then
+      localport=$port
+    fi
+    kubectl $config port-forward -n $namespace $type/$name $localport:$port
+    ;;
+  "pod")
+    data=$(kubectl $config get pod -n $namespace $name -o go-template='{{range.spec.containers}}{{range.ports}}{{.containerPort}}{{":"}}{{.protocol}}{{"\n"}}{{end}}{{end}}')
+    echo "Which port to connect?"
+    position=1
+    for i in $data; do
+      proto=$(get_proto $i)
+      port=$(get_port $i)
+      printf "${RED}$position${NC}) ${YELLOW}$proto ${GREEN} $port${NC}\n"
+      position=$((position + 1))
+    done
+    read -r -p 'Choose a number (1 is default): ' position
+    if [[ -z $position ]]
+    then
+      position=1
+    fi
+    selected=$(echo "$data" | sed -n "$position"p)
+    proto=$(get_proto $selected)
+    port=$(get_port $selected)
+    read -r -p 'Choose a localport to forward (the same as remote by default): ' localport
+    if [[ -z $localport ]]; then
+      localport=$port
+    fi
+    kubectl $config port-forward -n $namespace $type/$name $localport:$port
+    ;;
+  esac
+else
+  echo No such nothing
+  exit 2
+fi
