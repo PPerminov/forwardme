@@ -5,4 +5,4 @@ install:
 	cp ./port-forward $(iPATH)/
 
 update:
-	echo cp ./port-forward `which port-forward`
+	cp ./port-forward `which port-forward`
